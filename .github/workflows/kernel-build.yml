@@ -1,0 +1,68 @@
+name: Build Kernel and Platform Module
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+  workflow_dispatch: # Allows manual triggering from the GitHub UI
+
+env:
+  # Using a stable LTS kernel version
+  KERNEL_VERSION: 6.6.22 
+  ARCH: arm
+  CROSS_COMPILE: arm-linux-gnueabi-
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout Repository
+      uses: actions/checkout@v4
+
+    - name: Install Build Dependencies and Toolchain
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y \
+          gcc-arm-linux-gnueabi \
+          build-essential \
+          libncurses-dev \
+          bison \
+          flex \
+          libssl-dev \
+          libelf-dev \
+          bc \
+          wget \
+          tar
+
+    - name: Download and Extract Linux Kernel
+      run: |
+        wget https://cdn.kernel.org/pub/linux/kernel/v6.x/linux-${{ env.KERNEL_VERSION }}.tar.xz
+        tar -xf linux-${{ env.KERNEL_VERSION }}.tar.xz
+        
+    - name: Configure Kernel for Versatile PB
+      run: |
+        cd linux-${{ env.KERNEL_VERSION }}
+        make ARCH=${{ env.ARCH }} CROSS_COMPILE=${{ env.CROSS_COMPILE }} versatile_defconfig
+
+    - name: Build Linux Kernel
+      run: |
+        cd linux-${{ env.KERNEL_VERSION }}
+        # Build zImage, modules, and device tree blobs
+        make ARCH=${{ env.ARCH }} CROSS_COMPILE=${{ env.CROSS_COMPILE }} -j$(nproc) zImage modules dtbs
+
+    - name: Build Custom Platform Module
+      run: |
+        cd custom_module
+        # Pass the absolute path of the built kernel tree to the KDIR variable
+        make ARCH=${{ env.ARCH }} CROSS_COMPILE=${{ env.CROSS_COMPILE }} KDIR=${{ github.workspace }}/linux-${{ env.KERNEL_VERSION }}
+
+    - name: Upload Artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: build-artifacts
+        path: |
+          linux-${{ env.KERNEL_VERSION }}/arch/arm/boot/zImage
+          linux-${{ env.KERNEL_VERSION }}/arch/arm/boot/dts/arm/*.dtb
+          custom_module/my_platform_module.ko
